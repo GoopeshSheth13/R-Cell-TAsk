@@ -1,0 +1,252 @@
+#Projects Team Task for Research Cell Application: 
+#Task1: Develop a Task Management System Using Python
+#Candidate Name: Goopesh Sheth
+import tkinter as tk
+from tkinter import ttk, messagebox
+import datetime
+import requests
+
+# Task class to represent a single task
+class Task:
+    def __init__(self, task_id, description, due_date, priority):
+        self.task_id = task_id
+        self.description = description
+        self.due_date = due_date
+        self.priority = priority
+        self.status = "Pending"
+
+    def mark_completed(self):
+        self.status = "Completed"
+
+    def __str__(self):
+        return f"Task ID: {self.task_id}, Description: {self.description}, Due Date: {self.due_date}, Priority: {self.priority}, Status: {self.status}"
+
+# Task Management System class
+class TaskManagementSystem:
+    def __init__(self, master):
+        self.master = master
+        master.title("Task Management System")
+
+        # Create GUI components
+        self.task_list = ttk.Treeview(master, columns=("ID", "Description", "Due Date", "Priority", "Status"), show="headings")
+        self.task_list.heading("ID", text="ID")
+        self.task_list.heading("Description", text="Description")
+        self.task_list.heading("Due Date", text="Due Date")
+        self.task_list.heading("Priority", text="Priority")
+        self.task_list.heading("Status", text="Status")
+        self.task_list.pack(fill=tk.BOTH, expand=True)
+
+        self.task_list.bind("<Double-1>", self.view_task_details)
+
+        # GUI for Adding Tasks
+        self.add_task_frame = ttk.Frame(master)
+        self.add_task_frame.pack(pady=10)
+
+        self.description_entry = ttk.Entry(self.add_task_frame, width=30)
+        self.description_entry.pack(side=tk.LEFT, padx=5)
+
+        self.due_date_entry = ttk.Entry(self.add_task_frame, width=10)
+        self.due_date_entry.pack(side=tk.LEFT, padx=5)
+
+        self.priority_combo = ttk.Combobox(self.add_task_frame, values=["High", "Medium", "Low"], width=7)
+        self.priority_combo.pack(side=tk.LEFT, padx=5)
+
+        self.add_button = ttk.Button(self.add_task_frame, text="Add Task", command=self.add_task)
+        self.add_button.pack(side=tk.LEFT, padx=5)
+
+        self.sort_by_var = tk.StringVar()
+        self.sort_by_combo = ttk.Combobox(master, textvariable=self.sort_by_var, values=["Due Date", "Priority", "Status"])
+        self.sort_by_combo.pack(side=tk.LEFT, padx=5)
+
+        self.filter_by_var = tk.StringVar()
+        self.filter_by_combo = ttk.Combobox(master, textvariable=self.filter_by_var, values=["All", "Pending", "Completed"])
+        self.filter_by_combo.pack(side=tk.LEFT, padx=5)
+
+        self.refresh_button = ttk.Button(master, text="Refresh", command=self.refresh_tasks)
+        self.refresh_button.pack(side=tk.LEFT, padx=5)
+
+        self.update_button = ttk.Button(master, text="Update Task", command=self.update_task)
+        self.update_button.pack(side=tk.LEFT, padx=5)
+
+        self.delete_button = ttk.Button(master, text="Delete Task", command=self.delete_task)
+        self.delete_button.pack(side=tk.LEFT, padx=5)
+
+        self.complete_button = ttk.Button(master, text="Mark Completed", command=self.mark_task_completed)
+        self.complete_button.pack(side=tk.LEFT, padx=5)
+
+        self.tasks = []
+        self.next_task_id = 1
+        self.refresh_tasks()
+
+    def add_task(self):
+        description = self.description_entry.get()
+        due_date_str = self.due_date_entry.get()
+        priority = self.priority_combo.get()
+
+        if description and due_date_str and priority:
+            try:
+                due_date = datetime.datetime.strptime(due_date_str, "%Y-%m-%d").date()
+                task = Task(self.next_task_id, description, due_date, priority)
+                self.tasks.append(task)
+                self.next_task_id += 1
+
+                # Send the new task to the server
+                self.send_task_to_server(task)
+
+                self.description_entry.delete(0, tk.END)
+                self.due_date_entry.delete(0, tk.END)
+                self.priority_combo.set("")
+                self.refresh_tasks()
+            except ValueError:
+                messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
+        else:
+            messagebox.showerror("Error", "Please fill in all fields.")
+
+    def update_task(self):
+        selected_item = self.task_list.selection()
+        if selected_item:
+            task_id = int(self.task_list.item(selected_item)["values"][0])
+            task = self.get_task_by_id(task_id)
+            if task:
+                # Open Update Task dialog
+                UpdateTaskDialog(self.master, self, task)
+        else:
+            messagebox.showwarning("Select task", "Please select a task to update.")
+
+    def delete_task(self):
+        selected_item = self.task_list.selection()
+        if selected_item:
+            task_id = int(self.task_list.item(selected_item)["values"][0])
+            task = self.get_task_by_id(task_id)
+            if task:
+                self.tasks.remove(task)
+                self.refresh_tasks()
+            else:
+                messagebox.showerror("Error", "Task not found.")
+        else:
+            messagebox.showwarning("Select task", "Please select a task to delete.")
+
+    def mark_task_completed(self):
+        selected_item = self.task_list.selection()
+        if selected_item:
+            task_id = int(self.task_list.item(selected_item)["values"][0])
+            task = self.get_task_by_id(task_id)
+            if task:
+                task.mark_completed()
+                self.refresh_tasks()
+            else:
+                messagebox.showerror("Error", "Task not found.")
+        else:
+            messagebox.showwarning("Select task", "Please select a task to mark as completed.")
+
+    def refresh_tasks(self):
+        self.task_list.delete(*self.task_list.get_children())
+        sort_by = self.sort_by_var.get().lower() or None
+        status = self.filter_by_var.get().capitalize() or None
+
+        if sort_by == "due date":
+            self.tasks.sort(key=lambda x: x.due_date)
+        elif sort_by == "priority":
+            self.tasks.sort(key=lambda x: x.priority)
+        elif sort_by == "status":
+            self.tasks.sort(key=lambda x: x.status)
+
+        if status and status != "All":
+            filtered_tasks = [task for task in self.tasks if task.status == status]
+        else:
+            filtered_tasks = self.tasks
+
+        for task in filtered_tasks:
+            self.task_list.insert("", tk.END, values=(task.task_id, task.description, task.due_date, task.priority, task.status))
+
+    def view_task_details(self, event):
+        selected_item = self.task_list.selection()
+        if selected_item:
+            task_id = int(self.task_list.item(selected_item)["values"][0])
+            task = self.get_task_by_id(task_id)
+            if task:
+                messagebox.showinfo("Task Details", str(task))
+
+    def get_task_by_id(self, task_id):
+        for task in self.tasks:
+            if task.task_id == task_id:
+                return task
+        return None
+
+    def send_task_to_server(self, task):
+        # Replace this with the actual API endpoint URL
+        url = "https://api.example.com/tasks"
+
+        data = {
+            "task_id": task.task_id,
+            "description": task.description,
+            "due_date": task.due_date.isoformat(),
+            "priority": task.priority,
+            "status": task.status
+        }
+
+        try:
+            response = requests.post(url, json=data)
+            response.raise_for_status()
+            print("Task sent to server successfully.")
+        except requests.exceptions.RequestException as e:
+            print(f"Error sending task to server: {e}")
+
+class UpdateTaskDialog(tk.Toplevel):
+    def __init__(self, master, parent, task):
+        super().__init__(master)
+        self.parent = parent
+        self.task = task
+
+        self.title("Update Task")
+
+        self.label_description = tk.Label(self, text="Description")
+        self.label_description.grid(row=0, column=0, padx=10, pady=5)
+        self.entry_description = tk.Entry(self, width=30)
+        self.entry_description.insert(0, task.description)
+        self.entry_description.grid(row=0, column=1, padx=10, pady=5)
+
+        self.label_due_date = tk.Label(self, text="Due Date (YYYY-MM-DD)")
+        self.label_due_date.grid(row=1, column=0, padx=10, pady=5)
+        self.entry_due_date = tk.Entry(self, width=10)
+        self.entry_due_date.insert(0, task.due_date.strftime("%Y-%m-%d"))
+        self.entry_due_date.grid(row=1, column=1, padx=10, pady=5)
+
+        self.label_priority = tk.Label(self, text="Priority (High/Medium/Low)")
+        self.label_priority.grid(row=2, column=0, padx=10, pady=5)
+        self.combo_priority = ttk.Combobox(self, values=["High", "Medium", "Low"], width=7)
+        self.combo_priority.set(task.priority)
+        self.combo_priority.grid(row=2, column=1, padx=10, pady=5)
+
+        self.label_status = tk.Label(self, text="Status (Pending/Completed)")
+        self.label_status.grid(row=3, column=0, padx=10, pady=5)
+        self.combo_status = ttk.Combobox(self, values=["Pending", "Completed"], width=10)
+        self.combo_status.set(task.status)
+        self.combo_status.grid(row=3, column=1, padx=10, pady=5)
+
+        self.button_update = tk.Button(self, text="Update", command=self.update_task)
+        self.button_update.grid(row=4, column=0, columnspan=2, pady=10)
+
+    def update_task(self):
+        description = self.entry_description.get()
+        due_date_str = self.entry_due_date.get()
+        priority = self.combo_priority.get()
+        status = self.combo_status.get()
+
+        try:
+            due_date = datetime.datetime.strptime(due_date_str, "%Y-%m-%d").date()
+            self.task.description = description
+            self.task.due_date = due_date
+            self.task.priority = priority
+            self.task.status = status
+
+            self.parent.refresh_tasks()
+            self.destroy()
+        except ValueError:
+            messagebox.showerror("Error", "Invalid date format. Use YYYY-MM-DD.")
+
+# Run the Task Management System
+root = tk.Tk()
+task_manager = TaskManagementSystem(root)
+root.mainloop()
+
